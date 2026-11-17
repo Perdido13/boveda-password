@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>La Bóveda de Contraseñas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/spark-md5/3.0.2/spark-md5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hash-wasm@4.11.0/dist/argon2.umd.min.js"></script>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d2230;--mut:#677087;--line:#e1ddd2;--acc:#2f6fed;--ok:#0f8a4f;--bad:#c92a3b;--warn:#a86a00;--term:#12161f;--termink:#d7dcea;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10131a;--card:#181c26;--ink:#e8ebf4;--mut:#8f98b0;--line:#2a3040;--acc:#6b9bff;--ok:#43d18a;--bad:#ff6b7a;--warn:#f0b04a;--term:#0a0d13;--termink:#d7dcea;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10131a;--card:#181c26;--ink:#e8ebf4;--mut:#8f98b0;--line:#2a3040;--acc:#6b9bff;--ok:#43d18a;--bad:#ff6b7a;--warn:#f0b04a;--term:#0a0d13;--termink:#d7dcea;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1000px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.6rem;margin:0}.sub{color:var(--mut);margin:4px 0 16px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab,button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:10px;cursor:pointer}
+.tab.on,button.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+button:disabled{opacity:.5;cursor:wait}
+.steps{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px}
+.step{flex:0 0 auto;width:34px;height:34px;border-radius:50%;padding:0;display:grid;place-items:center}
+.step.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.badge{display:inline-block;font-size:.78rem;background:color-mix(in srgb,var(--acc) 15%,transparent);color:var(--acc);padding:2px 10px;border-radius:99px;font-weight:600}
+.card h2{margin:8px 0 6px;font-size:1.3rem}
+.simple{margin:0;font-size:1.05rem}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px}
+pre.term{background:var(--term);color:var(--termink);border-radius:12px;padding:14px;margin:0;min-height:220px;max-height:60vh;overflow:auto;font:13.5px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all}
+.t-titulo{color:var(--acc);font-weight:700}.t-ok{color:var(--ok)}.t-mal{color:var(--bad)}.t-dato{color:var(--warn)}.t-nota{color:var(--mut)}
+input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);min-width:0}
+.grid{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.msg{font-size:.92rem;margin-top:8px;min-height:1.3em}
+table{border-collapse:collapse;width:100%;font-size:.92rem}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);word-break:break-all}
+td input{width:100%}.hide{display:none}.note{color:var(--mut);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🗝️ La Bóveda de Contraseñas</h1>
+<p class="sub">Una historia en 8 escenas y un prototipo real. Todo se calcula en tu navegador.</p>
+<div class="tabs"><button class="tab on" data-t="h">📖 Modo historia</button><button class="tab" data-t="v">🔐 Bóveda real</button></div>
+
+<section id="h">
+  <div class="steps" id="steps"></div>
+  <div class="card"><span class="badge" id="concepto"></span><h2 id="titulo"></h2><p class="simple" id="simple"></p>
+    <div class="row"><button id="prev">← Anterior</button><button class="pri" id="run">▶ Ejecutar escena</button><button id="next">Siguiente →</button></div></div>
+  <pre class="term" id="out"></pre>
+</section>
+
+<section id="v" class="hide">
+  <div class="steps" id="vsteps"></div>
+  <div class="card"><span class="badge" id="vc"></span><h2 id="vt"></h2><p class="simple" id="vs"></p>
+    <div class="row"><button id="vprev">← Anterior</button><button class="pri" id="vnext">Siguiente →</button></div></div>
+  <div class="card" id="vbody"></div>
+</section>
+<p class="note" id="info"></p>
+</div>
+
+<script>
+// ============ MOTOR CRIPTOGRÁFICO (equivalente a boveda_core.py) ============
+const enc=new TextEncoder(),dec=new TextDecoder();
+const b64e=u=>btoa(String.fromCharCode(...u)),b64d=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const hex=u=>[...u].map(b=>b.toString(16).padStart(2,"0")).join("");
+const P={t:2,m:19456,p:1};          // Argon2id: 2 pasadas, 19 MiB, 1 hilo
+let kdfNombre="Argon2id",usaPBKDF2=false;
+const DATOS=[["Correo","admin@empresa.mx","verano2026"],["Banco","finanzas","123456"],["Nube","ti@empresa.mx","admin123"],["Servidor","root","x7!Qm#92zLp"]];
+const DICC=["123456","password","qwerty","verano2026","admin123","letmein","12345678","abc123","iloveyou","contraseña"];
+const FUERTE="Mi-Cofre#Secreto-2026",DEBIL="verano2026",COMP="boveda-desbloqueada-v1";
+const md5=t=>SparkMD5.hash(t);
+const nuevaSal=()=>crypto.getRandomValues(new Uint8Array(16));
+async function derivarLlave(pw,sal){
+  if(window.hashwasm&&!usaPBKDF2){try{return await hashwasm.argon2id({password:pw,salt:sal,parallelism:P.p,iterations:P.t,memorySize:P.m,hashLength:32,outputType:"binary"})}catch(e){usaPBKDF2=true;kdfNombre="PBKDF2 (respaldo)"}}
+  usaPBKDF2=true;kdfNombre="PBKDF2 (respaldo)";
+  const k=await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({name:"PBKDF2",salt:sal,iterations:600000,hash:"SHA-256"},k,256));
+}
+const aesKey=l=>crypto.subtle.importKey("raw",l,"AES-GCM",false,["encrypt","decrypt"]);
+async function sellar(llave,datos,aad){const n=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:n,additionalData:enc.encode(aad)},await aesKey(llave),datos));return{nonce:b64e(n),ct:b64e(ct)}}
+async function abrirSobre(llave,e,aad){const r=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(e.nonce),additionalData:enc.encode(aad)},await aesKey(llave),b64d(e.ct));return new Uint8Array(r)}
+async function cifrarEntrada(llave,s,u,p){const x=await sellar(llave,enc.encode(JSON.stringify({usuario:u,contrasena:p})),s);return{servicio:s,...x}}
+async function descifrarEntrada(llave,e){const d=JSON.parse(dec.decode(await abrirSobre(llave,e,e.servicio)));return[d.usuario,d.contrasena]}
+async function crearBoveda(maestra,entradas=[],sal=null,llave=null){
+  sal=sal||nuevaSal();llave=llave||await derivarLlave(maestra,sal);
+  const b={version:1,kdf:{algoritmo:"argon2id",time_cost:P.t,memory_kib:P.m,parallelism:P.p},sal:b64e(sal),comprobacion:await sellar(llave,enc.encode(COMP),"comprobacion"),entradas:[]};
+  for(const [s,u,p] of entradas)b.entradas.push(await cifrarEntrada(llave,s,u,p));return[b,llave]}
+async function abrirBoveda(b,maestra){const llave=await derivarLlave(maestra,b64d(b.sal));
+  try{if(dec.decode(await abrirSobre(llave,b.comprobacion,"comprobacion"))===COMP)return llave}catch(e){}
+  throw new Error("Contraseña maestra incorrecta")}
+async function verEntradas(b,llave){const f=[];for(const e of b.entradas){try{const[u,p]=await descifrarEntrada(llave,e);f.push([e.servicio,u,p,true])}catch(x){f.push([e.servicio,null,null,false])}}return f}
+const alterarBit=e=>{const c=b64d(e.ct);c[0]^=1;return{...e,ct:b64e(c)}};
+const dur=s=>s<1e-3?(s*1e6).toFixed(1)+" µs":s<1?(s*1e3).toFixed(1)+" ms":s<60?s.toFixed(1)+" s":s<3600?(s/60).toFixed(1)+" min":s<86400?(s/3600).toFixed(1)+" horas":s<31536000?Math.round(s/86400).toLocaleString("es-MX")+" días":(s/31536000).toLocaleString("es-MX",{maximumFractionDigits:1})+" años";
+const corto=(t,n=26)=>t.length<=n?t:t.slice(0,n)+"…";
+const pad=(t,n)=>String(t).padEnd(n);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// ============ HISTORIA ============
+const out=document.getElementById("out");
+async function emit(t="",c=""){const d=document.createElement("div");if(c)d.className="t-"+c;d.textContent=t||"\u00a0";out.appendChild(d);out.scrollTop=out.scrollHeight;await sleep(70)}
+const est={};
+async function asegurar(){if(!est.b)[est.b,est.k]=await crearBoveda(FUERTE,DATOS)}
+const ESC=[
+{t:"El Excel sin protección",c:"El problema",s:"Es como pegar las llaves de la oficina con cinta en la puerta: cualquiera que pase las ve.",f:async()=>{
+  await emit("📄 passwords.xlsx (así guarda hoy la empresa sus contraseñas)","titulo");await emit();
+  await emit(pad("Servicio",10)+pad("Usuario",18)+"Contraseña","dato");
+  for(const [s,u,p] of DATOS)await emit(pad(s,10)+pad(u,18)+p);
+  await emit();await emit("😬 Todo se lee a simple vista. No hay ninguna protección.","mal")}},
+{t:"El ladrón roba el Excel",c:"Sin protección no hay secreto",s:"Robar el archivo es como llevarse la puerta con las llaves pegadas. No hay que adivinar nada.",f:async()=>{
+  await emit("🥷 El ladrón copia el archivo en una memoria USB y lo abre...","titulo");await emit();
+  for(const [s,u,p] of DATOS)await emit(`   🔓 ${s}: usuario «${u}» contraseña «${p}»`,"mal");
+  await emit();await emit(`💀 Leyó ${DATOS.length} de ${DATOS.length} contraseñas, al instante.`,"mal");await emit("   Hace falta protegerlas.","nota")}},
+{t:"Primer parche: MD5",c:"Funciones hash · preimagen",s:"Guardar la «huella digital» de cada contraseña. No puedes reconstruir a la persona con su huella, pero sí comparar huellas de sospechosos muy rápido.",f:async()=>{
+  await emit("Primer parche: guardar solo la «huella» (hash MD5)","titulo");await emit();
+  const h={};await emit(pad("Servicio",10)+"MD5(contraseña)","dato");
+  for(const [s,u,p] of DATOS){h[s]=md5(p);await emit(pad(s,10)+h[s])}
+  await emit();await emit("✅ Ya no se lee a simple vista y el hash no se «deshace» (resistencia a preimagen)...","ok");await emit();
+  await emit("🥷 ...pero el ladrón no lo deshace: PRUEBA palabras comunes y compara huellas.","titulo");
+  const t0=performance.now(),mapa={};for(const c of DICC)mapa[md5(c)]=c;const seg=(performance.now()-t0)/1000;let n=0;await emit();
+  for(const [s] of DATOS){if(mapa[h[s]]){n++;await emit(`   💥 ${pad(s,10)} ¡era «${mapa[h[s]]}»!`,"mal")}else await emit(`   🛡️ ${pad(s,10)} no está en el diccionario (larga y aleatoria)`,"ok")}
+  await emit();await emit(`Recuperó ${n} de ${DATOS.length} probando ${DICC.length} candidatos en ${dur(seg)}.`,"mal");await emit("MD5 es rapidísimo y sin sal: ese es su defecto.","nota")}},
+{t:"Nace la llave maestra",c:"KDF: Argon2id + sal",s:"Una receta muy lenta con un ingrediente al azar (la sal). Tú esperas un instante una vez; quien adivina millones de veces, no.",f:async()=>{
+  await emit("Nace la llave: contraseña maestra + sal → Argon2id → llave","titulo");await emit();
+  const sal=nuevaSal();await emit(`🧠 Contraseña maestra : ${FUERTE}`,"dato");await emit(`🧂 Sal (al azar)      : ${b64e(sal)}`,"dato");
+  await emit("⏳ Cocinando la llave (es lenta a propósito)...","nota");
+  const t0=performance.now(),k=await derivarLlave(FUERTE,sal),seg=(performance.now()-t0)/1000;
+  await emit(`⚙️  ${kdfNombre}: ${usaPBKDF2?"600 000 iteraciones":`${P.t} pasadas, ${Math.round(P.m/1024)} MiB, ${P.p} hilo`}`,"dato");
+  await emit(`🗝️  Llave (¡SECRETA!)   : ${hex(k).slice(0,40)}…`,"ok");await emit(`   Tardó ${dur(seg)}. Para ti es poco; para quien prueba millones, es eterno.`,"nota");await emit();
+  await emit("🧂 Misma contraseña, OTRA sal → llave totalmente distinta:","titulo");
+  const o=await derivarLlave(FUERTE,nuevaSal());await emit("   "+hex(k).slice(0,40)+"…","dato");await emit("   "+hex(o).slice(0,40)+"…","dato");await emit("   Por eso cada bóveda es única.","nota");
+  [est.b,est.k]=await crearBoveda(FUERTE,DATOS,sal,k)}},
+{t:"Se llenan los sobres",c:"AEAD: AES-GCM, nonce y AAD",s:"Cada contraseña va en su propio sobre sellado, con el nombre escrito por fuera. Sin la llave es ilegible; si lo tocan, el sello se rompe.",f:async()=>{
+  await asegurar();await emit("Cada contraseña va en su propio sobre sellado (AES-256-GCM)","titulo");await emit();
+  await emit(pad("Servicio (visible)",19)+pad("Nonce (único)",16)+pad("Texto cifrado",28)+"Contenido","dato");
+  for(const e of est.b.entradas)await emit(pad(e.servicio,19)+pad(hex(b64d(e.nonce)).slice(0,12)+"…",16)+pad(corto(e.ct,24),28)+"🔒 ilegible");
+  await emit();await emit("• Cada sobre tiene su propio nonce (nunca se repite).","ok");await emit("• El nombre del servicio queda atado al sello (AAD): si lo cambian, se rompe.","ok");await emit("• Con la llave, el dueño sí puede abrirlos (escena 8).","ok")}},
+{t:"El ladrón roba la caja",c:"Autenticación: detectar alteraciones",s:"Se llevan la caja, pero adentro solo hay sobres sellados. Si intentan abrirlos o cambiarlos, se nota.",f:async()=>{
+  await asegurar();const b=est.b;await emit("🥷 El ladrón roba la caja: boveda.json","titulo");await emit();
+  await emit(`   sal           : ${b.sal}`,"dato");await emit(`   comprobación  : ${corto(b.comprobacion.ct,30)}`,"dato");
+  for(const e of b.entradas)await emit(`   ${pad(e.servicio,9)} → ${corto(e.ct,34)}`,"dato");
+  await emit();await emit("   No hay ni una contraseña legible. Solo basura cifrada. 🔒","ok");await emit();
+  await emit("🥷 Prueba 1: cambiar UN solo bit del texto cifrado","titulo");
+  try{await descifrarEntrada(est.k,alterarBit(b.entradas[0]));await emit("   (no se detectó)","mal")}catch(e){await emit("   ⚠️  InvalidTag: el sello se rompió. Entrada rechazada.","ok")}
+  await emit();await emit("🥷 Prueba 2: cambiar el nombre del servicio (AAD)","titulo");
+  try{await descifrarEntrada(est.k,{...b.entradas[1],servicio:b.entradas[1].servicio+" (falso)"});await emit("   (no se detectó)","mal")}catch(e){await emit("   ⚠️  InvalidTag: el nombre ya no coincide con el sello. Rechazada.","ok")}
+  await emit();await emit("🥷 Prueba 3: abrir con una contraseña maestra incorrecta","titulo");
+  try{await abrirBoveda(b,"contraseña-equivocada");await emit("   (se abrió)","mal")}catch(e){await emit("   ❌ Contraseña maestra incorrecta. No se abre nada.","ok")}}},
+{t:"Ataque de diccionario",c:"Costo de Argon2id vs MD5",s:"Probar palabras comunes en un candado rápido es fácil; en uno que tarda un instante por intento, es una condena. Pero si tu clave es «verano2026», igual cae.",f:async()=>{
+  await asegurar();await emit("🥷 El ladrón usa el MISMO diccionario de contraseñas comunes","titulo");await emit(`   (${DICC.length} candidatos). Ahora cada intento es un ${kdfNombre} completo.`,"nota");await emit();
+  const ataque=async(b)=>{let tot=0,i=0;for(const c of DICC){i++;const t=performance.now();let ok=true;try{await abrirBoveda(b,c)}catch(e){ok=false}const s=(performance.now()-t)/1000;tot+=s;
+    await emit(`   intento ${String(i).padStart(2)}/${DICC.length}: ${pad(c,12)} ${ok?"💥 ¡ABRIÓ!":"❌ no"} (${dur(s)})`,ok?"mal":"nota");if(ok)return[c,i,tot]}return[null,i,tot]};
+  await emit("— Caso A: maestra FUERTE —","titulo");let [r,n,seg]=await ataque(est.b);
+  if(!r)await emit(`🛡️ Resistió: ${n} intentos en ${dur(seg)} y nada.`,"ok");await emit();
+  await emit("— Caso B: maestra DÉBIL («verano2026», está en el diccionario) —","titulo");
+  const [deb]=await crearBoveda(DEBIL,DATOS);[r,n,seg]=await ataque(deb);
+  if(r)await emit(`💥 Rota en ${n} intentos. Moraleja: la bóveda es tan fuerte como tu maestra.`,"mal");await emit("   Argon2id no arregla una maestra débil: solo encarece cada intento.","nota");await emit();
+  await emit("— El costo real, por intento —","titulo");await emit("⏳ Midiendo...","nota");
+  let t0=performance.now();const N=100000;for(let i=0;i<N;i++)md5("candidato"+i);const m=(performance.now()-t0)/1000/N;
+  const sal=nuevaSal();t0=performance.now();for(let i=0;i<3;i++)await derivarLlave("candidato"+i,sal);const a=(performance.now()-t0)/1000/3;
+  await emit(`   MD5       : ${dur(m)} por intento`,"mal");await emit(`   ${pad(kdfNombre,10)}: ${dur(a)} por intento`,"ok");await emit(`   → ≈ ${Math.round(a/m).toLocaleString("es-MX")} veces más costoso para el atacante.`,"ok");await emit();
+  const G=1e9;await emit(`Con un diccionario de ${G.toLocaleString("es-MX")} palabras:`,"titulo");await emit(`   MD5      : ${dur(m*G)}`,"mal");await emit(`   ${pad(kdfNombre,9)}: ${dur(a*G)} (con un solo equipo)`,"ok")}},
+{t:"El dueño abre su cofre",c:"Se cierra el círculo",s:"Con la palabra secreta correcta, el dueño ve todo otra vez, como en el Excel. Legible para él, basura para el ladrón.",f:async()=>{
+  await asegurar();await emit("🏠 El dueño abre su bóveda con la contraseña maestra correcta","titulo");await emit();
+  const k=await abrirBoveda(est.b,FUERTE);await emit(`🔓 Bóveda abierta con «${FUERTE}»`,"ok");await emit();
+  await emit(pad("Servicio",10)+pad("Usuario",18)+"Contraseña","dato");
+  for(const [s,u,p,ok] of await verEntradas(est.b,k))await emit(ok?pad(s,10)+pad(u,18)+p:pad(s,10)+"⚠️ entrada alterada",ok?"":"mal");
+  await emit();await emit("✅ Para el dueño: legible, como el Excel.","ok");await emit("✅ Para el ladrón: basura cifrada que no puede abrir.","ok");await emit("Eso es una bóveda de contraseñas.","titulo")}}
+];
+let cur=0,busy=false;
+const $=id=>document.getElementById(id);
+const stepsEl=$("steps");ESC.forEach((_,i)=>{const b=document.createElement("button");b.className="step";b.textContent=i+1;b.onclick=()=>go(i);stepsEl.appendChild(b)});
+function go(i){if(busy)return;cur=Math.max(0,Math.min(ESC.length-1,i));const e=ESC[cur];$("titulo").textContent=`Escena ${cur+1}: ${e.t}`;$("concepto").textContent="📚 "+e.c;$("simple").textContent="💡 "+e.s;out.textContent="";
+  [...stepsEl.children].forEach((b,j)=>b.classList.toggle("on",j===cur));$("prev").disabled=cur===0;$("next").disabled=cur===ESC.length-1}
+function lock(v){busy=v;["run","prev","next"].forEach(x=>$(x).disabled=v);$("run").textContent=v?"⏳ Ejecutando...":"▶ Ejecutar escena";if(!v)go(cur)&&0}
+$("run").onclick=async()=>{if(busy)return;out.textContent="";lock(true);try{await ESC[cur].f()}catch(e){await emit("Error: "+e.message,"mal")}busy=false;$("run").disabled=false;$("run").textContent="▶ Ejecutar escena";$("prev").disabled=cur===0;$("next").disabled=cur===ESC.length-1;$("info").textContent=`Algoritmo de llave usado: ${kdfNombre}`};
+$("prev").onclick=()=>go(cur-1);$("next").onclick=()=>go(cur+1);
+document.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT"||$("h").classList.contains("hide"))return;if(e.key==="ArrowRight")go(cur+1);if(e.key==="ArrowLeft")go(cur-1);if(e.key==="Enter")$("run").click()});
+go(0);
+
+// ============ BÓVEDA REAL (guiada paso a paso, con tus propios datos) ============
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let VR=DATOS.map(r=>[...r]),V=null,K=null,M="",OWN=null,sealed=0,gone=false,maxV=0,curV=0,run=false;
+const VS=[
+{t:"Paso 1 · Tus contraseñas hoy (el Excel)",c:"El problema",s:"Estos son los 4 datos de la empresa. Puedes editarlos, agregar o borrar filas. Fíjate: todo se lee a simple vista."},
+{t:"Paso 2 · Elige tu contraseña maestra",c:"KDF: Argon2id + sal",s:"La llave nace de tu contraseña maestra mezclada con una sal al azar, en una receta lenta a propósito. Prueba una fácil y luego una larga: la diferencia se nota en el paso 5."},
+{t:"Paso 3 · Sella cada contraseña en su sobre",c:"AEAD: AES-GCM, nonce y AAD",s:"Cada fila del Excel se mete en un sobre sellado con tu llave. Séllalos uno por uno y luego borra el original."},
+{t:"Paso 4 · El ladrón roba la caja",c:"Autenticación: detectar alteraciones",s:"Esto es lo único que se lleva el ladrón. Intenta manipularlo y mira cómo reacciona."},
+{t:"Paso 5 · Ataque de diccionario a TU bóveda",c:"Costo de Argon2id vs MD5",s:"El ladrón prueba palabras comunes como contraseña maestra. Si elegiste una fácil, cae; si elegiste una larga, resiste."},
+{t:"Paso 6 · El dueño abre su cofre",c:"Se cierra el círculo",s:"Con tu maestra correcta todo vuelve a ser legible, como en el Excel. Aquí también puedes agregar contraseñas nuevas."}];
+const upd=()=>{$("vnext").disabled=run||!ready()||curV===5;$("vprev").disabled=run||curV===0};
+const ready=()=>[VR.length>0&&VR.every(r=>r[0].trim()&&r[2]),!!V,VR.length>0&&sealed===VR.length,true,true,false][curV];
+function reset(){V=null;K=null;OWN=null;sealed=0;gone=false}
+async function vlog(el,t,c=""){const d=document.createElement("div");if(c)d.className="t-"+c;d.textContent=t||"\u00a0";el.appendChild(d);el.scrollTop=el.scrollHeight;await sleep(60)}
+const vsteps=$("vsteps");VS.forEach((_,i)=>{const b=document.createElement("button");b.className="step";b.textContent=i+1;b.onclick=()=>vgo(i);vsteps.appendChild(b)});
+function vgo(i){if(run)return;curV=i;maxV=Math.max(maxV,i);vrender()}
+function vrender(){const s=VS[curV];$("vc").textContent="📚 "+s.c;$("vt").textContent=s.t;$("vs").textContent="💡 "+s.s;
+  [...vsteps.children].forEach((b,j)=>{b.classList.toggle("on",j===curV);b.disabled=j>maxV});upd();[r0,r1,r2,r3,r4,r5][curV]($("vbody"))}
+$("vprev").onclick=()=>vgo(curV-1);$("vnext").onclick=()=>vgo(curV+1);
+
+function r0(b){
+  const row=(r,i)=>`<tr>${[0,1,2].map(j=>`<td><input data-i="${i}" data-j="${j}" value="${esc(r[j])}"></td>`).join("")}<td><button data-d="${i}">✕</button></td></tr>`;
+  b.innerHTML=`<p class="note">📄 passwords.xlsx</p><div style="overflow-x:auto"><table><tr><th>Servicio</th><th>Usuario</th><th>Contraseña</th><th></th></tr>${VR.map(row).join("")}</table></div><div class="row"><button id="ar">+ Agregar fila</button></div><p class="t-mal">😬 Cualquiera que abra el archivo ve todo. No hay ninguna protección.</p>`;
+  b.querySelectorAll("input").forEach(i=>i.oninput=()=>{VR[i.dataset.i][i.dataset.j]=i.value;reset();maxV=0;upd()});
+  b.querySelectorAll("[data-d]").forEach(x=>x.onclick=()=>{VR.splice(+x.dataset.d,1);reset();maxV=0;vrender()});
+  $("ar").onclick=()=>{VR.push(["","",""]);reset();maxV=0;vrender()}}
+
+function r1(b){
+  b.innerHTML=`<div class="row" style="margin-top:0"><input id="mm" placeholder="Tu contraseña maestra" value="${esc(M)}" size="26"><button class="pri" id="cook">🍳 Cocinar la llave</button></div><div class="msg" id="fz"></div><pre class="term" id="kl" style="min-height:90px;margin-top:10px"></pre>`;
+  const fz=()=>{const v=$("mm").value,f=$("fz");f.style.color="";
+    if(!v)f.textContent="";else if(DICC.includes(v)){f.textContent="⚠️ Está en el diccionario del ladrón.";f.style.color="var(--bad)"}
+    else if(v.length<12){f.textContent="🟡 Corta: aguanta, pero podría ser mejor.";f.style.color="var(--warn)"}
+    else{f.textContent="✅ Larga y fuera de los diccionarios comunes.";f.style.color="var(--ok)"}};
+  $("mm").oninput=fz;fz();
+  if(V)vlog($("kl"),`🔑 Llave ya cocinada con «${M}». Puedes avanzar o cocinar otra.`,"ok");
+  $("cook").onclick=async()=>{const m=$("mm").value;if(!m)return;run=true;upd();$("cook").disabled=true;const el=$("kl");el.textContent="";M=m;reset();maxV=1;
+    const sal=nuevaSal();await vlog(el,`🧠 Maestra : ${m}`,"dato");await vlog(el,`🧂 Sal     : ${b64e(sal)}`,"dato");await vlog(el,"⏳ Cocinando (lenta a propósito)...","nota");
+    const t0=performance.now();K=await derivarLlave(m,sal);const seg=(performance.now()-t0)/1000;
+    await vlog(el,`⚙️  ${kdfNombre}`,"dato");await vlog(el,`🗝️  Llave   : ${hex(K).slice(0,40)}…`,"ok");await vlog(el,`   Tardó ${dur(seg)}. Es tu único costo; el ladrón lo paga en cada intento.`,"nota");
+    const o=await derivarLlave(m,nuevaSal());await vlog(el,`🧂 Misma maestra, otra sal → ${hex(o).slice(0,24)}… (otra llave)`,"nota");
+    [V]=await crearBoveda(m,[],sal,K);run=false;$("cook").disabled=false;upd()}}
+
+function r2(b){
+  const rows=VR.map((r,i)=>{const e=V.entradas[i];return `<tr><td>${esc(r[0])}</td><td>${gone?"— borrada —":esc(r[2])}</td><td>${e?hex(b64d(e.nonce)).slice(0,12)+"…":""}</td><td>${e?esc(corto(e.ct,22)):""}</td><td>${e?"🔒":"…"}</td></tr>`}).join("");
+  b.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Servicio</th><th>Contraseña original</th><th>Nonce (único)</th><th>Texto cifrado</th><th></th></tr>${rows}</table></div><div class="row"><button class="pri" id="s1">✉️ Sellar siguiente sobre</button><button id="sa">Sellar todos</button><button id="bx">🗑️ Borrar el Excel original</button></div><div class="msg" id="sm"></div>`;
+  const done=sealed===VR.length;$("s1").disabled=$("sa").disabled=done;$("bx").disabled=!done||gone;
+  $("sm").textContent=gone?"🗑️ El Excel ya no existe. Solo la llave abre estos sobres.":done?"✅ Todos sellados. Cada uno con su propio nonce y su servicio como AAD.":"";
+  const seal=async n=>{if(run)return;run=true;upd();for(let k=0;k<n&&sealed<VR.length;k++){const r=VR[sealed];V.entradas.push(await cifrarEntrada(K,r[0],r[1],r[2]));sealed++;maxV=Math.max(maxV,sealed===VR.length?3:2);run=false;vrender();run=true;await sleep(250)}run=false;upd()};
+  $("s1").onclick=()=>seal(1);$("sa").onclick=()=>seal(99);$("bx").onclick=()=>{gone=true;vrender()}}
+
+function r3(b){
+  b.innerHTML=`<p class="note">🥷 Esto es TODO lo que se lleva el ladrón (boveda.json): sal, nonces y texto cifrado.</p><pre class="term" style="min-height:100px;max-height:260px;font-size:12px">${esc(JSON.stringify(V,null,2))}</pre><div class="row"><button id="a1">Alterar 1 bit</button><button id="a2">Cambiar nombre del servicio</button><input id="wm" value="contraseña-equivocada" size="20"><button id="a3">Probar maestra</button></div><pre class="term" id="tl" style="min-height:90px;margin-top:10px"></pre>`;
+  const L=$("tl"),j=V.entradas.length>1?1:0;
+  $("a1").onclick=async()=>{await vlog(L,"🥷 Cambio UN bit del texto cifrado...","titulo");try{await descifrarEntrada(K,alterarBit(V.entradas[0]));await vlog(L,"(no se detectó)","mal")}catch(e){await vlog(L,"   ⚠️ InvalidTag: el sello se rompió. Entrada rechazada.","ok")}};
+  $("a2").onclick=async()=>{await vlog(L,"🥷 Cambio el nombre del servicio (AAD)...","titulo");try{await descifrarEntrada(K,{...V.entradas[j],servicio:V.entradas[j].servicio+" (falso)"});await vlog(L,"(no se detectó)","mal")}catch(e){await vlog(L,"   ⚠️ InvalidTag: el nombre ya no coincide con el sello.","ok")}};
+  $("a3").onclick=async()=>{const w=$("wm").value;await vlog(L,`🥷 Pruebo «${w}» como maestra...`,"titulo");try{await abrirBoveda(V,w);await vlog(L,"   🔓 ¡Esa SÍ es la maestra!","mal")}catch(e){await vlog(L,"   ❌ Contraseña maestra incorrecta. No se abre nada.","ok")}}}
+
+function r4(b){
+  b.innerHTML=`<p class="note">Diccionario del ladrón (${DICC.length} palabras comunes): ${DICC.map(esc).join(", ")}</p><div class="row"><button class="pri" id="at">🥷 Lanzar ataque a tu bóveda</button></div><pre class="term" id="al" style="min-height:170px;margin-top:10px"></pre>`;
+  $("at").onclick=async()=>{run=true;upd();$("at").disabled=true;const L=$("al");L.textContent="";let tot=0,i=0,hit=null;
+    for(const c of DICC){i++;const t=performance.now();let ok=true;try{await abrirBoveda(V,c)}catch(e){ok=false}const s=(performance.now()-t)/1000;tot+=s;
+      await vlog(L,`intento ${String(i).padStart(2)}/${DICC.length}: ${pad(c,12)} ${ok?"💥 ¡ABRIÓ!":"❌ no"} (${dur(s)})`,ok?"mal":"nota");if(ok){hit=c;break}}
+    await vlog(L);
+    if(hit)await vlog(L,`💥 Rota en ${i} intentos con «${hit}». Una maestra débil anula todo el cifrado.`,"mal");
+    else{await vlog(L,`🛡️ Resistió: ${i} intentos en ${dur(tot)} y nada.`,"ok");await vlog(L,"   Prueba el paso 2 con «verano2026» para ver cómo cae.","nota")}
+    const N=100000,t0=performance.now();for(let k=0;k<N;k++)md5("c"+k);const m=(performance.now()-t0)/1000/N,a=tot/i;
+    await vlog(L);await vlog(L,`Por intento: MD5 ${dur(m)} · ${kdfNombre} ${dur(a)} → ≈ ${Math.round(a/m).toLocaleString("es-MX")} veces más costoso.`,"ok");
+    run=false;$("at").disabled=false;maxV=5;upd()}}
+
+function r5(b){
+  b.innerHTML=`<div class="row" style="margin-top:0"><input id="om" type="password" placeholder="Contraseña maestra" size="22"><button class="pri" id="ob">🔓 Desbloquear</button><button id="ol">🔒 Bloquear</button></div><div class="msg" id="om2"></div><div id="ot"></div>`;
+  const show=async()=>{const t=$("ot");if(!OWN){t.innerHTML="";return}
+    const f=await verEntradas(V,OWN);t.innerHTML=`<div style="overflow-x:auto"><table><tr><th>Servicio</th><th>Usuario</th><th>Contraseña</th></tr>${f.map(([s,u,p,ok])=>`<tr><td>${esc(s)}</td><td>${ok?esc(u):"⚠️ alterada"}</td><td>${ok?esc(p):""}</td></tr>`).join("")}</table></div><div class="row"><input id="ns" placeholder="Servicio" size="10"><input id="nu" placeholder="Usuario" size="10"><input id="np" placeholder="Contraseña" size="10"><button id="na">Cifrar y guardar</button></div><p class="t-ok">✅ Legible para el dueño, como el Excel. Ilegible para el ladrón.</p>`;
+    $("na").onclick=async()=>{const s=$("ns").value.trim(),p=$("np").value;if(!s||!p)return;V.entradas.push(await cifrarEntrada(OWN,s,$("nu").value,p));show()}};
+  $("ob").onclick=async()=>{const m2=$("om2");m2.style.color="";m2.textContent="⏳ Probando...";try{OWN=await abrirBoveda(V,$("om").value);m2.textContent="🔓 Bóveda abierta.";m2.style.color="var(--ok)"}catch(e){OWN=null;m2.textContent="❌ "+e.message;m2.style.color="var(--bad)"}show()};
+  $("ol").onclick=()=>{OWN=null;$("om2").textContent="🔒 Bloqueada.";show()};show()}
+vrender();
+
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));$("h").classList.toggle("hide",b.dataset.t!=="h");$("v").classList.toggle("hide",b.dataset.t!=="v")});
+</script>
+</body>
+</html>
