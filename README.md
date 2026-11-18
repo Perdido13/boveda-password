@@ -163,4 +163,4 @@ Universidad de Guadalajara · CUGDL
 
 ## 📄 Licencia
 
-Proyecto con fines académicos. (CUGDl).
+Proyecto con fines académicos. (CUGDL).
