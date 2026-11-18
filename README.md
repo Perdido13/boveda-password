@@ -163,4 +163,4 @@ Universidad de Guadalajara · CUGDL
 
 ## 📄 Licencia
 
-Proyecto con fines académicos. Agrega aquí la licencia que prefieras (por ejemplo, MIT).
+Proyecto con fines académicos. (CUGDl).
